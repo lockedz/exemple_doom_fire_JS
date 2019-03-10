@@ -1,0 +1,215 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>Fogo do DOOM Javascript</title>
+<style type="text/css">
+body {
+	background-color: #000;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+}
+.controls {
+	display: flex;
+	flex-direction: row;
+	font-family: Cambria, Cochin, Georgia, Times, 'Times New Roman', serif;
+	font-size: 18px;
+	color: #ffe4c4;
+}
+.controls input {
+	width: 40px;
+	border: 0px;
+	margin-left:  4px;
+	margin-right: 4px;
+}
+.divSpace {
+	height: 20px;
+}
+</style>
+</head>
+<body>
+<div class='divSpace'></div>
+	<canvas id="myCanvas" width="1" height="1">
+	</canvas>
+<div class='divSpace'></div>
+<div class='controls'>
+	CELL_SIZE	<input type='number' name='guiCelSize' value='' id='guiCelSize' onchange='updateValueFromGui(this.id)' />
+	WindDirection	<input type='number' name='guiWindDirection' value='' id='guiWindDirection' min=0 max=2 step=1 onchange='updateValueFromGui(this.id)' />
+	DELAY		<input type='number' name='guiDelay' value='' id='guiDelay' onchange='updateValueFromGui(this.id)' disabled />
+	INTENSITY	<input type='number' name='guiIntensity' value='' id='guiIntensity' onchange='updateValueFromGui(this.id)' min=2 max=10 step=1 />
+</div>
+
+<script type="text/javascript">
+'use strict';
+
+const ctx = document.getElementById('myCanvas').getContext('2d');
+const MAX_WIDTH = 200;
+const MAX_HEIGHT = 100;
+let CELL_SIZE = 5;
+let DELAY = 50;
+let DECAY_INTENSITY = 3; // 1 = MAX, MEDIUM = 3, LOW = 10; THE HIGHER THE WEAKER THE FIRE IS
+let animationFrameHandler = null;
+
+const LAST_ARRAY_LINE = MAX_WIDTH * (MAX_HEIGHT-1);
+const colorArray = [{"r":7,"g":7,"b":7},{"r":31,"g":7,"b":7},{"r":47,"g":15,"b":7},{"r":71,"g":15,"b":7},{"r":87,"g":23,"b":7},{"r":103,"g":31,"b":7},{"r":119,"g":31,"b":7},
+{"r":143,"g":39,"b":7},{"r":159,"g":47,"b":7},{"r":175,"g":63,"b":7},{"r":191,"g":71,"b":7},{"r":199,"g":71,"b":7},{"r":223,"g":79,"b":7},{"r":223,"g":87,"b":7},{"r":223,"g":87,"b":7},
+{"r":215,"g":95,"b":7},{"r":215,"g":95,"b":7},{"r":215,"g":103,"b":15},{"r":207,"g":111,"b":15},{"r":207,"g":119,"b":15},{"r":207,"g":127,"b":15},{"r":207,"g":135,"b":23},
+{"r":199,"g":135,"b":23},{"r":199,"g":143,"b":23},{"r":199,"g":151,"b":31},{"r":191,"g":159,"b":31},{"r":191,"g":159,"b":31},{"r":191,"g":167,"b":39},{"r":191,"g":167,"b":39},
+{"r":191,"g":175,"b":47},{"r":183,"g":175,"b":47},{"r":183,"g":183,"b":47},{"r":183,"g":183,"b":55},{"r":207,"g":207,"b":111},{"r":223,"g":223,"b":159},{"r":239,"g":239,"b":199},
+{"r":255,"g":255,"b":255}];
+const TOTAL_COLORS_IN_ARRAY = colorArray.length - 1; // How many INDEXES there are (length counting from 0)
+
+let fireArray = [];
+let timerHandler = null;
+let isColorInverted = false; // TODO: Create a radio input to toggle color
+let windDirection = 0; // 0 = left, 1 = right, 2 = no wind
+
+
+const negativeColors = (s) => { // Throw away this function, dafuq is this sh!t
+// in: 'number, number, number'
+	let splitS = s.split(',');
+	let aux = {
+		r: Math.abs(parseInt(splitS[0]) - 255),
+		g: Math.abs(parseInt(splitS[1]) - 255),
+		b: Math.abs(parseInt(splitS[2]) - 255)
+	};
+	
+	return `${aux.r}, ${aux.g}, ${aux.b}`;
+}
+
+const buildDataStructure = () => {
+	let currentIndex = 0;
+
+	for (let i = 0; i < MAX_HEIGHT; i++) {
+		for (let j = 0; j< MAX_WIDTH; j++) {
+			fireArray[currentIndex] = TOTAL_COLORS_IN_ARRAY;
+			currentIndex++;
+		}
+	}
+}
+
+const updateDataStructure = () => {
+	let currentIndex = LAST_ARRAY_LINE-1; // We'll go from last to first
+	let newCurrentIndex = currentIndex;
+	let indexBelow = 0;
+	let newFireValue = 0;
+	let decay = 0;
+
+	for (let i = MAX_HEIGHT-1; i > 0; i--) {
+		for (let j = MAX_WIDTH; j > 0; j--) {
+			// Look at the value below and update self
+			indexBelow = currentIndex + MAX_WIDTH; // directly below currentIndex value
+
+			// this is relate to the FIRE INTENSITY: the more the decay, the less intense the fire will be
+			decay = Math.floor(Math.random() * DECAY_INTENSITY);
+			newFireValue = fireArray[indexBelow] - decay;
+
+			// Add a random variable to simulate wind on the fire. Instead of updating currentIndex, update someone next to it
+			switch(windDirection) {
+				case 0:
+					newCurrentIndex = currentIndex - decay;
+				break;
+				case 1:
+					newCurrentIndex = currentIndex + decay;
+				break;
+				case 2:
+				default:
+					newCurrentIndex = currentIndex;
+				break;
+			}
+			// Adjust for OutOfBounds
+			if (newCurrentIndex < 0) {
+				newCurrentIndex = 0;
+			} else if (newCurrentIndex > MAX_HEIGHT * MAX_WIDTH) {
+				// If out of bounds: adjust to boundary again (as maximum value)
+				newCurrentIndex = MAX_HEIGHT * MAX_WIDTH;
+			}
+			
+			fireArray[newCurrentIndex] = newFireValue >= 0 ? newFireValue : 0; // Exclude negative values
+			currentIndex--;
+		}
+	}
+}
+
+const renderTable = () => {
+	let currentIndex = 0;
+	let lineColor = '';
+	
+	for (let i = 0; i < MAX_HEIGHT; i++) {
+		
+		for (let j = 0; j < MAX_WIDTH; j++) {
+			lineColor = `${colorArray[fireArray[currentIndex]].r}, ${colorArray[fireArray[currentIndex]].g}, ${colorArray[fireArray[currentIndex]].b}`;
+			lineColor = (isColorInverted) ? `rgb(${negativeColors(lineColor)})` : `rgb(${lineColor}`;
+			
+			drawCanvasRect(CELL_SIZE * j, CELL_SIZE * i, CELL_SIZE, CELL_SIZE, lineColor);
+			
+			currentIndex++;
+		}
+
+	}
+}
+
+const drawCanvasRect = (x, y, w, h, color_) => {
+	ctx.beginPath();
+	ctx.rect(x, y, w, h);
+	ctx.fillStyle = color_;
+	ctx.fill();
+}
+
+const updateValueFromGui = (_id) => 
+{
+	let _value = parseInt(document.getElementById(_id).value);
+
+	switch (_id)
+	{
+		case 'guiWindDirection':
+			windDirection = _value;
+		break;
+		case 'guiCelSize':
+			CELL_SIZE = _value;
+		break;
+		// case 'guiDelay':
+		// 	DELAY = _value;
+		// break;
+		case 'guiIntensity':
+			DECAY_INTENSITY = _value;
+		break;
+		default:
+			return;
+	}
+
+	window.cancelAnimationFrame(animationFrameHandler);
+	loop(); // "Smooth" effects transictions
+	//init(); // "Hard" effects transictions (but delay & size will only work OK here)
+	
+	return;
+}
+
+const init = () => {
+	let d = document;
+	d.getElementById('myCanvas').width = MAX_WIDTH * CELL_SIZE;
+	d.getElementById('myCanvas').height = MAX_HEIGHT * CELL_SIZE;
+	d.getElementById('guiWindDirection').value = windDirection;
+	d.getElementById('guiCelSize').value = CELL_SIZE;
+	d.getElementById('guiDelay').value = DELAY;
+	d.getElementById('guiIntensity').value = DECAY_INTENSITY;
+	
+	buildDataStructure();
+
+	loop();
+	//timerHandler = window.setInterval(loop, DELAY); // Comment if utilizing requestAnimationFrame() at loop function
+}
+
+const loop = () => {
+	updateDataStructure();
+	renderTable();
+
+	animationFrameHandler = window.requestAnimationFrame(loop);
+}
+
+init();
+</script>
+</body>
+</html>
